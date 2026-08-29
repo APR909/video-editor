@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Editor de Vídeo</title>
+<meta name="description" content="Editor de vídeo en el navegador: recorta, ordena clips, añade texto y filtros, y exporta un MP4 — todo sin subir nada a ningún servidor. Proyecto personal de Alejandro Provencio.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=Work+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="https://apr909.github.io/Portfolio/#projects">
+    <span class="brand-mark">AP</span>
+    <span class="brand-name">Editor <em>de Vídeo</em></span>
+  </a>
+  <span class="build-tag mono">// proyecto personal · WebCodecs + Mediabunny</span>
+</header>
+
+<main class="stage">
+
+  <!-- IMPORT -->
+  <section class="panel" id="import-panel">
+    <p class="eyebrow mono">// clips</p>
+    <h2>Importar vídeo</h2>
+    <p class="panel-note">Todo ocurre en tu navegador — nada se sube a ningún servidor. Añade uno o varios clips; se colocan en la línea de tiempo en el orden en que los subas.</p>
+
+    <div id="dropzone" class="dropzone">
+      <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4m0 0L7 9m5-5l5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+      <p><strong>Arrastra uno o varios vídeos aquí</strong><br>o haz clic para elegirlos</p>
+      <input id="file-input" type="file" accept="video/*" multiple hidden>
+    </div>
+    <p id="file-error" class="field-error hidden">Ese archivo no parece ser un vídeo compatible. Prueba con un MP4 o WebM.</p>
+    <p id="loading-note" class="loading-note hidden mono">Leyendo el vídeo…</p>
+  </section>
+
+  <!-- TIMELINE -->
+  <section class="panel hidden" id="timeline-panel">
+    <p class="eyebrow mono">// línea de tiempo</p>
+    <h2>Clips</h2>
+    <p class="panel-note">Recorta cada clip, reordénalos, o quítalos. La duración total se actualiza abajo.</p>
+    <div id="clip-list" class="clip-list"></div>
+    <p class="total-duration mono">Duración total: <span id="total-duration">0:00</span></p>
+  </section>
+
+  <!-- PREVIEW -->
+  <section class="panel hidden" id="preview-panel">
+    <p class="eyebrow mono">// vista previa</p>
+    <h2>Vista previa</h2>
+    <div class="preview-wrap">
+      <canvas id="preview-canvas" width="960" height="540"></canvas>
+      <video id="source-video" muted playsinline hidden></video>
+    </div>
+    <div class="transport">
+      <button id="btn-play" class="btn-icon" aria-label="Reproducir">
+        <svg id="icon-play" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icon-pause" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" class="hidden"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      </button>
+      <span id="time-current" class="mono time">0:00</span>
+      <input id="seek" type="range" min="0" max="100" value="0" step="0.05">
+      <span id="time-duration" class="mono time">0:00</span>
+    </div>
+  </section>
+
+  <!-- TEXT & FILTERS -->
+  <section class="panel hidden" id="fx-panel">
+    <p class="eyebrow mono">// texto y filtros</p>
+    <h2>Texto y filtros</h2>
+
+    <h3 class="fx-subtitle">Rótulos de texto</h3>
+    <div id="overlay-list" class="overlay-list"></div>
+    <button id="btn-add-overlay" class="btn-text" type="button">+ Añadir rótulo</button>
+
+    <h3 class="fx-subtitle">Filtro de color</h3>
+    <div class="editor-row">
+      <label class="editor-control">
+        <span>Preajuste</span>
+        <select id="filter-preset">
+          <option value="none">Ninguno</option>
+          <option value="warm">Cálido</option>
+          <option value="cool">Frío</option>
+          <option value="bw">Blanco y negro</option>
+          <option value="custom">Personalizado</option>
+        </select>
+      </label>
+      <label class="editor-control">
+        <span>Brillo</span>
+        <input id="filter-brightness" type="range" min="50" max="150" value="100" step="1">
+      </label>
+      <label class="editor-control">
+        <span>Contraste</span>
+        <input id="filter-contrast" type="range" min="50" max="150" value="100" step="1">
+      </label>
+      <label class="editor-control">
+        <span>Saturación</span>
+        <input id="filter-saturate" type="range" min="0" max="200" value="100" step="1">
+      </label>
+    </div>
+  </section>
+
+  <!-- EXPORT -->
+  <section class="panel hidden" id="export-panel">
+    <p class="eyebrow mono">// exportar</p>
+    <h2>Exportar</h2>
+    <p class="panel-note">Renderiza la línea de tiempo completa (recortes, texto y filtros incluidos) y descarga un MP4 nuevo. El archivo original nunca se modifica. Los vídeos largos pueden tardar un rato.</p>
+    <div class="export-row">
+      <button id="btn-export" class="btn-primary" type="button">Exportar vídeo (.mp4)</button>
+      <span id="export-status" class="mono export-status"></span>
+    </div>
+    <div id="export-progress-wrap" class="export-progress-wrap hidden">
+      <div id="export-progress-bar" class="export-progress-bar"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer mono">
+  <a href="https://apr909.github.io/Portfolio/#projects">← volver al portfolio</a>
+</footer>
+
+<script src="js/main.js" type="module"></script>
+</body>
+</html>
