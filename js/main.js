@@ -37,6 +37,7 @@ const totalDurationEl = document.getElementById("total-duration");
 const canvas = document.getElementById("preview-canvas");
 const ctx = canvas.getContext("2d");
 const sourceVideo = document.getElementById("source-video");
+const sourceVideoB = document.getElementById("source-video-b");
 
 const btnPlay = document.getElementById("btn-play");
 const iconPlay = document.getElementById("icon-play");
@@ -100,6 +101,8 @@ async function importFiles(files) {
         file, input, videoTrack, duration, width, height,
         trimStart: 0, trimEnd: duration,
         thumbUrl, objectUrl,
+        volume: 1, muted: false,
+        transitionOut: 0,
       });
     } catch (err) {
       fileError.textContent = `No se ha podido leer "${file.name}". Prueba con otro archivo.`;
@@ -129,7 +132,12 @@ function formatTime(sec) {
 }
 
 function getTotalDuration() {
-  return clips.reduce((sum, c) => sum + Math.max(0, c.trimEnd - c.trimStart), 0);
+  let total = 0;
+  clips.forEach((c, i) => {
+    total += Math.max(0, c.trimEnd - c.trimStart);
+    if (i < clips.length - 1) total -= (c.transitionOut || 0);
+  });
+  return Math.max(0, total);
 }
 
 function renderTimeline() {
@@ -147,6 +155,19 @@ function renderTimeline() {
           <input type="number" class="trim-end" min="0" step="0.1" value="${clip.trimEnd.toFixed(1)}">
           <span>de ${formatTime(clip.duration)}</span>
         </div>
+        <div class="clip-audio">
+          <button class="btn-mute ${clip.muted ? "is-muted" : ""}" title="${clip.muted ? "Activar sonido" : "Silenciar"}">
+            <svg class="icon-vol-on" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8a5 5 0 0 1 0 8M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+            <svg class="icon-vol-off" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+          </button>
+          <input type="range" class="clip-volume" min="0" max="1" step="0.05" value="${clip.volume}" ${clip.muted ? "disabled" : ""}>
+        </div>
+        ${i < clips.length - 1 ? `
+        <div class="clip-transition">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h4l3-7 4 14 3-7h2"/></svg>
+          <input type="range" class="clip-trans" min="0" max="${Math.min(2, (clip.trimEnd - clip.trimStart) / 2, ((clips[i+1]?.trimEnd - clips[i+1]?.trimStart) || 2) / 2).toFixed(2)}" step="0.1" value="${clip.transitionOut}">
+          <span class="trans-value mono">${clip.transitionOut.toFixed(1)}s</span>
+        </div>` : ""}
       </div>
       <div class="clip-actions">
         <button class="btn-up" title="Mover arriba" ${i === 0 ? "disabled" : ""}>
@@ -197,6 +218,23 @@ function renderTimeline() {
         resetPlayhead();
       }
     });
+    row.querySelector(".btn-mute").addEventListener("click", () => {
+      clip.muted = !clip.muted;
+      renderTimeline();
+      applyActiveClipVolume();
+    });
+    row.querySelector(".clip-volume").addEventListener("input", (e) => {
+      clip.volume = parseFloat(e.target.value);
+      applyActiveClipVolume();
+    });
+    const transEl = row.querySelector(".clip-trans");
+    if (transEl) {
+      transEl.addEventListener("input", (e) => {
+        clip.transitionOut = parseFloat(e.target.value);
+        row.querySelector(".trans-value").textContent = `${clip.transitionOut.toFixed(1)}s`;
+        updateTotalDuration();
+      });
+    }
 
     clipListEl.appendChild(row);
   });
@@ -292,22 +330,23 @@ function getCanvasFilter() {
 // (clip index, local time within that clip's source file)
 // ============================================================
 function globalTimeToClip(t) {
-  let acc = 0;
-  for (let i = 0; i < clips.length; i++) {
-    const clip = clips[i];
-    const len = clip.trimEnd - clip.trimStart;
-    if (t < acc + len || i === clips.length - 1) {
-      const local = clip.trimStart + Math.max(0, Math.min(len, t - acc));
-      return { index: i, localTime: local, clipGlobalStart: acc };
+  for (let i = clips.length - 1; i >= 0; i--) {
+    const start = clipGlobalStart(i);
+    if (t >= start || i === 0) {
+      const len = clips[i].trimEnd - clips[i].trimStart;
+      const local = clips[i].trimStart + Math.max(0, Math.min(len, t - start));
+      return { index: i, localTime: local, clipGlobalStart: start };
     }
-    acc += len;
   }
   return { index: -1, localTime: 0, clipGlobalStart: 0 };
 }
 
 function clipGlobalStart(index) {
   let acc = 0;
-  for (let i = 0; i < index; i++) acc += clips[i].trimEnd - clips[i].trimStart;
+  for (let i = 0; i < index; i++) {
+    acc += clips[i].trimEnd - clips[i].trimStart;
+    acc -= (clips[i].transitionOut || 0);
+  }
   return acc;
 }
 
@@ -321,6 +360,12 @@ function drawOverlaysAt(globalTime) {
 // ============================================================
 // PREVIEW PLAYBACK
 // ============================================================
+function applyActiveClipVolume() {
+  const clip = clips[activeClipIndex];
+  if (!clip) return;
+  sourceVideo.volume = clip.muted ? 0 : clip.volume;
+}
+
 function resetPlayhead() {
   isPlaying = false;
   activeClipIndex = -1;
@@ -342,9 +387,50 @@ async function seekToGlobalTime(t) {
     await new Promise((resolve) => {
       sourceVideo.onloadedmetadata = resolve;
     });
+    applyActiveClipVolume();
+    transitionPrepared = false;
+    preloadedForClip = -1;
+    sourceVideoB.pause();
   }
   sourceVideo.currentTime = localTime;
   await new Promise((resolve) => { sourceVideo.onseeked = resolve; });
+}
+
+let transitionPrepared = false;
+let preloadedForClip = -1; // which clip index we've already preloaded sourceVideoB for
+
+function drawVideoLetterboxed(video, w, h, alpha) {
+  if (video.readyState < 2 || alpha <= 0) return;
+  const vw = video.videoWidth || w, vh = video.videoHeight || h;
+  const scale = Math.min(w / vw, h / vh);
+  const dw = vw * scale, dh = vh * scale;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  ctx.globalAlpha = 1;
+}
+
+// loads the next clip's metadata into sourceVideoB well ahead of the actual
+// transition window, so activating it later is just a quick seek — without
+// this, the network+decode delay of a cold load eats into the blend itself
+function preloadNextClipForTransition() {
+  const clip = clips[activeClipIndex];
+  if (!clip || !clip.transitionOut || activeClipIndex >= clips.length - 1) return;
+  if (preloadedForClip === activeClipIndex) return;
+  preloadedForClip = activeClipIndex;
+  sourceVideoB.src = clips[activeClipIndex + 1].objectUrl;
+  sourceVideoB.load();
+}
+
+async function activateTransition() {
+  transitionPrepared = true;
+  const nextClip = clips[activeClipIndex + 1];
+  if (!nextClip) return;
+  if (sourceVideoB.readyState < 1) {
+    await new Promise((resolve) => { sourceVideoB.onloadedmetadata = resolve; });
+  }
+  sourceVideoB.currentTime = nextClip.trimStart;
+  await new Promise((resolve) => { sourceVideoB.onseeked = resolve; });
+  if (isPlaying) sourceVideoB.play().catch(() => {});
 }
 
 function drawCurrentFrame() {
@@ -353,13 +439,25 @@ function drawCurrentFrame() {
   ctx.filter = getCanvasFilter();
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, w, h);
-  if (sourceVideo.readyState >= 2) {
-    // letterbox to fit while preserving aspect ratio
-    const vw = sourceVideo.videoWidth || w, vh = sourceVideo.videoHeight || h;
-    const scale = Math.min(w / vw, h / vh);
-    const dw = vw * scale, dh = vh * scale;
-    ctx.drawImage(sourceVideo, (w - dw) / 2, (h - dh) / 2, dw, dh);
+
+  const clip = clips[activeClipIndex];
+  const transDur = clip ? (clip.transitionOut || 0) : 0;
+  const hasNext = activeClipIndex >= 0 && activeClipIndex < clips.length - 1;
+  const timeLeft = clip ? clip.trimEnd - sourceVideo.currentTime : Infinity;
+  const inTransition = hasNext && transDur > 0 && timeLeft <= transDur && timeLeft > -0.2;
+  // start preloading a little before the window opens, not right when it does
+  if (hasNext && transDur > 0 && timeLeft <= transDur + 0.6) preloadNextClipForTransition();
+
+  if (inTransition) {
+    if (!transitionPrepared) activateTransition();
+    const p = Math.max(0, Math.min(1, 1 - timeLeft / transDur));
+    drawVideoLetterboxed(sourceVideo, w, h, 1 - p);
+    drawVideoLetterboxed(sourceVideoB, w, h, p);
+  } else {
+    if (transitionPrepared) { sourceVideoB.pause(); transitionPrepared = false; }
+    if (sourceVideo.readyState >= 2) drawVideoLetterboxed(sourceVideo, w, h, 1);
   }
+
   ctx.restore();
   const globalTime = clipGlobalStart(activeClipIndex) + (sourceVideo.currentTime - (clips[activeClipIndex]?.trimStart || 0));
   drawOverlaysAt(globalTime);
@@ -413,6 +511,10 @@ async function advanceToNextClip() {
   const clip = clips[activeClipIndex];
   sourceVideo.src = clip.objectUrl;
   await new Promise((resolve) => { sourceVideo.onloadedmetadata = resolve; });
+  applyActiveClipVolume();
+  transitionPrepared = false;
+  preloadedForClip = -1;
+  sourceVideoB.pause();
   sourceVideo.currentTime = clip.trimStart;
   await new Promise((resolve) => { sourceVideo.onseeked = resolve; });
   if (isPlaying) {
@@ -511,15 +613,28 @@ btnExport.addEventListener("click", async () => {
     const totalDuration = getTotalDuration();
     let processedDuration = 0;
 
-    for (const clip of clips) {
-      const clipLen = clip.trimEnd - clip.trimStart;
-      const globalStart = processedDuration;
+    function drawCanvasLetterboxed(srcCanvas, w, h, alpha) {
+      if (!srcCanvas || alpha <= 0) return;
+      const scale = Math.min(w / srcCanvas.width, h / srcCanvas.height);
+      const dw = srcCanvas.width * scale, dh = srcCanvas.height * scale;
+      exportCtx.globalAlpha = alpha;
+      exportCtx.drawImage(srcCanvas, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      exportCtx.globalAlpha = 1;
+    }
 
-      // ---- video frames ----
+    for (let ci = 0; ci < clips.length; ci++) {
+      const clip = clips[ci];
+      const transIn = ci > 0 ? (clips[ci - 1].transitionOut || 0) : 0;
+      const transOut = ci < clips.length - 1 ? (clip.transitionOut || 0) : 0;
+      const globalStart = processedDuration;
+      const normalStart = clip.trimStart + transIn;
+      const normalEnd = clip.trimEnd - transOut;
+
+      // ---- normal (non-blended) video frames ----
       const decodable = await clip.videoTrack.canDecode();
-      if (decodable) {
+      if (decodable && normalEnd > normalStart) {
         const sink = new VideoSampleSink(clip.videoTrack);
-        for await (const sample of sink.samples(clip.trimStart, clip.trimEnd)) {
+        for await (const sample of sink.samples(normalStart, normalEnd)) {
           exportCtx.save();
           exportCtx.filter = getCanvasFilter();
           exportCtx.fillStyle = "#000";
@@ -529,34 +644,85 @@ btnExport.addEventListener("click", async () => {
           sample.draw(exportCtx, (outWidth - dw) / 2, (outHeight - dh) / 2, dw, dh);
           exportCtx.restore();
 
-          const globalTime = globalStart + (sample.timestamp - clip.trimStart);
+          const globalTime = globalStart + Math.max(0, sample.timestamp - normalStart);
           drawOverlaysOnContext(exportCtx, outWidth, outHeight, globalTime);
 
-          const outTimestamp = globalStart + Math.max(0, sample.timestamp - clip.trimStart);
+          const outTimestamp = globalStart + Math.max(0, sample.timestamp - normalStart);
           await videoSource.add(outTimestamp, sample.duration);
           sample.close();
 
-          processedDuration = Math.min(totalDuration, globalStart + Math.max(0, sample.timestamp - clip.trimStart));
+          processedDuration = Math.max(processedDuration, outTimestamp);
           setExportProgress(totalDuration ? processedDuration / totalDuration : 0);
         }
       }
 
-      // ---- audio ----
-      if (audioSource) {
-        const audioTrack = await clip.input.getPrimaryAudioTrack();
-        const audioDecodable = audioTrack && (await audioTrack.canDecode());
-        if (audioDecodable) {
-          const sink = new AudioSampleSink(audioTrack);
-          for await (const sample of sink.samples(clip.trimStart, clip.trimEnd)) {
-            await audioSource.add(sample.toAudioBuffer());
-            sample.close();
-          }
-        } else {
-          await audioSource.add(await silentAudioBuffer(clipLen, targetSampleRate, targetChannels));
+      // ---- cross-fade blend into the next clip ----
+      if (transOut > 0 && ci < clips.length - 1) {
+        const nextClip = clips[ci + 1];
+        const fps = 20;
+        const steps = Math.max(1, Math.round(transOut * fps));
+        const thisSink = decodable ? new CanvasSink(clip.videoTrack, { width: outWidth }) : null;
+        const nextDecodable = await nextClip.videoTrack.canDecode();
+        const nextSink = nextDecodable ? new CanvasSink(nextClip.videoTrack, { width: outWidth }) : null;
+        const blendStart = globalStart + (normalEnd - normalStart);
+
+        for (let s = 0; s <= steps; s++) {
+          const frac = s / steps;
+          const tThis = clip.trimEnd - transOut + frac * transOut;
+          const tNext = nextClip.trimStart + frac * transOut;
+
+          exportCtx.save();
+          exportCtx.filter = getCanvasFilter();
+          exportCtx.fillStyle = "#000";
+          exportCtx.fillRect(0, 0, outWidth, outHeight);
+
+          const resThis = thisSink ? await thisSink.getCanvas(tThis) : null;
+          drawCanvasLetterboxed(resThis ? resThis.canvas : null, outWidth, outHeight, 1 - frac);
+          const resNext = nextSink ? await nextSink.getCanvas(tNext) : null;
+          drawCanvasLetterboxed(resNext ? resNext.canvas : null, outWidth, outHeight, frac);
+          exportCtx.restore();
+
+          const globalTime = blendStart + frac * transOut;
+          drawOverlaysOnContext(exportCtx, outWidth, outHeight, globalTime);
+
+          const outTimestamp = blendStart + frac * transOut;
+          await videoSource.add(outTimestamp, 1 / fps);
+
+          processedDuration = Math.max(processedDuration, outTimestamp);
+          setExportProgress(totalDuration ? processedDuration / totalDuration : 0);
         }
       }
 
-      processedDuration = globalStart + clipLen;
+      // ---- audio (skips the head portion already covered by the previous
+      // clip's transition-out, so total audio length matches total video
+      // length exactly — otherwise audio would run longer than video and
+      // drift out of sync after every transition) ----
+      if (audioSource) {
+        const audioTrack = await clip.input.getPrimaryAudioTrack();
+        const audioDecodable = audioTrack && (await audioTrack.canDecode());
+        const clipVol = clip.muted ? 0 : clip.volume;
+        const audioStart = clip.trimStart + transIn;
+        const audioLen = Math.max(0, clip.trimEnd - audioStart);
+        if (audioDecodable && audioLen > 0) {
+          const sink = new AudioSampleSink(audioTrack);
+          for await (const sample of sink.samples(audioStart, clip.trimEnd)) {
+            const buf = sample.toAudioBuffer();
+            if (clipVol !== 1) {
+              for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+                const data = buf.getChannelData(ch);
+                for (let i = 0; i < data.length; i++) data[i] *= clipVol;
+                buf.copyToChannel(data, ch);
+              }
+            }
+            await audioSource.add(buf);
+            sample.close();
+          }
+        } else if (audioLen > 0) {
+          await audioSource.add(await silentAudioBuffer(audioLen, targetSampleRate, targetChannels));
+        }
+      }
+
+      processedDuration = globalStart + (normalEnd - normalStart) + transOut;
       setExportProgress(totalDuration ? processedDuration / totalDuration : 0);
     }
 

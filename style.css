@@ -189,6 +189,48 @@ a { color: inherit; }
 }
 .clip-trim span { font-size: 0.72rem; color: var(--ink-soft); }
 
+.clip-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.btn-mute {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 0;
+}
+.btn-mute:hover { color: var(--ink); }
+.btn-mute .icon-vol-off { display: none; }
+.btn-mute.is-muted .icon-vol-on { display: none; }
+.btn-mute.is-muted .icon-vol-off { display: block; color: var(--burgundy-mid); }
+.clip-volume {
+  flex: 1;
+  max-width: 120px;
+  accent-color: var(--burgundy-deep);
+}
+.clip-volume:disabled { opacity: 0.35; }
+
+.clip-transition {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--brass);
+}
+.clip-transition svg { flex-shrink: 0; }
+.clip-transition input[type="range"] {
+  flex: 1;
+  max-width: 100px;
+  accent-color: var(--brass);
+}
+.trans-value { font-size: 0.7rem; color: var(--ink-soft); min-width: 28px; }
+
 .clip-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .clip-actions button {
   width: 30px; height: 30px;
